@@ -91,6 +91,9 @@ def generate_blog_content(topic: str) -> Tuple[str, str, int]:
 
 def publish_to_wordpress(title: str, content: str) -> Dict:
     """Publish post to WordPress via REST API"""
+    if not WORDPRESS_URL or not WORDPRESS_USER or not WORDPRESS_PASSWORD:
+        raise Exception("WordPress credentials not configured. Set WORDPRESS_URL, WORDPRESS_USER, WORDPRESS_PASSWORD secrets.")
+
     auth_string = base64.b64encode(
         f"{WORDPRESS_USER}:{WORDPRESS_PASSWORD}".encode()
     ).decode()
@@ -120,6 +123,9 @@ def publish_to_wordpress(title: str, content: str) -> Dict:
 
 def create_airtable_record(title: str, topic: str, url: str, word_count: int) -> Dict:
     """Create record in Airtable tracking table"""
+    if not AIRTABLE_TOKEN or not AIRTABLE_BASE_ID:
+        raise Exception("Airtable credentials not configured. Set AIRTABLE_TOKEN and AIRTABLE_BASE_ID secrets.")
+
     headers = {
         "Authorization": f"Bearer {AIRTABLE_TOKEN}",
         "Content-Type": "application/json"
@@ -150,26 +156,17 @@ def create_airtable_record(title: str, topic: str, url: str, word_count: int) ->
 
 def post_to_slack(title: str, url: str, topic: str) -> bool:
     """Post social copy notification to Slack"""
-    social_copy = f"""🎬 **NEW BLOG POST**
+    if not SLACK_WEBHOOK:
+        print("WARNING: SLACK_WEBHOOK not set, skipping notification")
+        return False
 
-**{title}**
-
+    social_copy = f"""NEW BLOG POST: {title}
 Topic: {topic}
 Read: {url}
-
 #AdobeCreativeCloud #Filmmaking"""
 
     payload = {
-        "text": social_copy,
-        "blocks": [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": social_copy
-                }
-            }
-        ]
+        "text": social_copy
     }
 
     response = requests.post(
@@ -180,36 +177,44 @@ Read: {url}
 
     return response.status_code == 200
 
+def set_github_output(name: str, value: str):
+    """Write a key=value pair to the GITHUB_OUTPUT file (replaces deprecated ::set-output)"""
+    github_output = os.getenv('GITHUB_OUTPUT')
+    if github_output:
+        with open(github_output, 'a') as f:
+            f.write(f"{name}={value}\n")
+
 def main():
     """Main workflow: generate, publish, track, notify"""
     try:
-        print("🚀 Daily blog automation started")
+        print("Daily blog automation started")
 
         topic = get_todays_topic()
-        print(f"📝 Today's topic: {topic}")
+        print(f"Today's topic: {topic}")
 
         title, content, word_count = generate_blog_content(topic)
-        print(f"✍️  Generated: {title} ({word_count} words)")
+        print(f"Generated: {title} ({word_count} words)")
 
         wp_response = publish_to_wordpress(title, content)
         post_id = wp_response.get('id')
         post_url = wp_response.get('link')
-        print(f"✅ Published to WordPress: {post_url}")
+        print(f"Published to WordPress: {post_url}")
 
         airtable_response = create_airtable_record(title, topic, post_url, word_count)
-        print(f"📊 Airtable record created")
+        print("Airtable record created")
 
         slack_success = post_to_slack(title, post_url, topic)
         if slack_success:
-            print(f"💬 Slack notification sent")
+            print("Slack notification sent")
 
-        print(f"::set-output name=title::{title}")
-        print(f"::set-output name=url::{post_url}")
+        # Write outputs using new GITHUB_OUTPUT syntax (replaces deprecated ::set-output)
+        set_github_output("title", title)
+        set_github_output("url", post_url)
 
-        print("✨ Daily blog automation complete!")
+        print("Daily blog automation complete!")
 
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"Error: {str(e)}")
         raise
 
 if __name__ == "__main__":
